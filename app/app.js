@@ -1,51 +1,52 @@
 /* ================================================================
-   GlowGuide — Application Logic
-   Quiz engine, Recommendation engine, Screen router
-   (Web app layout — no phone frame)
+   GlowGuide - Application Logic
+   Clean web app: quiz engine, recommendation engine, page router
    ================================================================ */
 
-/* -- State ---------------------------------------------------- */
 const state = {
-  currentScreen: 'home',
+  page: 'home',
   quizStep: 0,
   answers: {},
-  recommendedProducts: [],
-  selectedProduct: null,
-  history: []
+  results: [],
+  selectedProduct: null
 };
 
-const screen = () => document.getElementById('screen');
+const app = () => document.getElementById('app');
 
 /* ================================================================
-   RECOMMENDATION ENGINE (FR-04)
+   RECOMMENDATION ENGINE
    ================================================================ */
 function recommend(answers) {
   const { skinType, concern, routine } = answers;
+  const caps = { minimal: 3, moderate: 5, full: 7 };
+  const maxProducts = caps[routine] || 5;
 
-  // 1. Filter products matching skin type AND concern
+  // Filter: must match skin type AND concern
   let pool = PRODUCTS.filter(p =>
     p.skinTypes.includes(skinType) && p.concerns.includes(concern)
   );
 
-  // 2. Cap based on routine preference
-  const stepCounts = { minimal: 3, moderate: 5, full: 7 };
-  const maxProducts = stepCounts[routine] || 5;
-
-  // 3. Score each product
+  // Score each product
   pool = pool.map(p => {
     let score = 0;
-    if (p.skinTypes[0] === skinType) score += 3; else score += 1;
-    if (p.concerns[0] === concern) score += 3; else score += 1;
-    score += (p.rating - 4) * 2;
+    // Primary skin type match (first in array = best fit)
+    score += p.skinTypes[0] === skinType ? 4 : 1;
+    // Primary concern match
+    score += p.concerns[0] === concern ? 4 : 1;
+    // Rating bonus
+    score += (p.rating - 4) * 3;
+    // Review popularity (minor bonus)
+    score += Math.min(p.reviews / 10000, 1);
     return { ...p, score };
   });
 
-  // 4. Sort by step then score
+  // Sort by step order, then score descending
   pool.sort((a, b) => a.step - b.step || b.score - a.score);
 
-  // 5. Pick best per step
+  // Pick best per step (ensures variety across routine)
   const chosen = [];
   const usedSteps = new Set();
+
   for (const p of pool) {
     if (chosen.length >= maxProducts) break;
     if (!usedSteps.has(p.step)) {
@@ -54,18 +55,20 @@ function recommend(answers) {
     }
   }
 
-  // 6. Fill remaining slots if needed
+  // Fill remaining slots with next-best products
   if (chosen.length < maxProducts) {
     for (const p of pool) {
       if (chosen.length >= maxProducts) break;
-      if (!chosen.find(c => c.id === p.id)) chosen.push(p);
+      if (!chosen.find(c => c.id === p.id)) {
+        chosen.push(p);
+      }
     }
   }
 
-  // 7. Final sort by step
+  // Sort final selection by step
   chosen.sort((a, b) => a.step - b.step);
 
-  // 8. Personalise reason text
+  // Personalise reason text
   return chosen.map(p => ({
     ...p,
     reason: p.reason
@@ -77,108 +80,96 @@ function recommend(answers) {
 /* ================================================================
    NAVIGATION
    ================================================================ */
-function navigate(target, opts = {}) {
-  if (!opts.isBack) {
-    state.history.push({
-      screen: state.currentScreen,
-      quizStep: state.quizStep,
-      product: state.selectedProduct
-    });
-  }
-  state.currentScreen = target;
+function navigate(page) {
+  state.page = page;
   render();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function goBack() {
-  if (state.history.length === 0) { navigate('home', { isBack: true }); return; }
-  const prev = state.history.pop();
-  state.currentScreen = prev.screen;
-  state.quizStep = prev.quizStep ?? state.quizStep;
-  state.selectedProduct = prev.product ?? state.selectedProduct;
-  render(true);
-}
-
-/* ── Nav link highlighting ── */
-function updateNav() {
-  document.querySelectorAll('.nav-link').forEach(link => {
-    link.classList.toggle('active',
-      link.dataset.screen === state.currentScreen ||
-      (link.dataset.screen === 'quiz' && ['quiz', 'results', 'product'].includes(state.currentScreen))
-    );
-  });
+function updateNavHighlight() {
+  const homeBtn = document.getElementById('navHome');
+  const quizBtn = document.getElementById('navQuiz');
+  if (homeBtn) homeBtn.classList.toggle('active', state.page === 'home');
+  if (quizBtn) quizBtn.classList.toggle('active', state.page !== 'home');
 }
 
 /* ================================================================
-   RENDER DISPATCHER
+   RENDER
    ================================================================ */
-function render(isBack = false) {
-  const el = screen();
-  el.classList.add('fade-out');
-  setTimeout(() => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    switch (state.currentScreen) {
-      case 'home':    renderHome(el);    break;
-      case 'quiz':    renderQuiz(el);    break;
-      case 'results': renderResults(el); break;
-      case 'product': renderProduct(el); break;
-    }
-    el.classList.remove('fade-out');
-    el.classList.add('fade-in');
-    updateNav();
-  }, 150);
+function render() {
+  const el = app();
+  switch (state.page) {
+    case 'home':    renderHome(el); break;
+    case 'quiz':    renderQuiz(el); break;
+    case 'results': renderResults(el); break;
+    case 'detail':  renderDetail(el); break;
+  }
+  updateNavHighlight();
 }
 
 /* ================================================================
-   HOME SCREEN
+   HOME PAGE
    ================================================================ */
 function renderHome(el) {
   el.innerHTML = `
-    <div class="hero-banner">
-      <div class="hero-icon">\u2728</div>
-      <h1>Your Personalised Skincare Routine</h1>
-      <p>Answer 3 quick questions and get a science-backed routine tailored to your skin type, concerns, and lifestyle.</p>
-    </div>
+    <section class="home-hero">
+      <h1>Find Your Perfect Skincare Routine</h1>
+      <p>Answer 3 simple questions about your skin and get a personalised, science-backed product routine in under 60 seconds.</p>
+      <button class="cta-btn" id="heroStart">\u{1F9EA} Start the Skin Quiz</button>
+    </section>
 
-    <div class="stats-strip">
-      <div class="stat-pill"><div class="num">3</div><div class="lbl">Questions</div></div>
-      <div class="stat-pill"><div class="num">60s</div><div class="lbl">To Complete</div></div>
-      <div class="stat-pill"><div class="num">15+</div><div class="lbl">Products in DB</div></div>
-      <div class="stat-pill"><div class="num">5</div><div class="lbl">Skin Types</div></div>
-    </div>
-
-    <div class="features-grid">
-      <div class="feature-card">
+    <section class="home-features">
+      <div class="feature-box">
         <div class="icon">\u{1F9EC}</div>
-        <h3>Skin Type Analysis</h3>
-        <p>Tell us about your skin and we match products that work with your natural chemistry.</p>
+        <h3>Skin Type Matching</h3>
+        <p>Products filtered to work with your specific skin chemistry - oily, dry, combination, normal or sensitive.</p>
       </div>
-      <div class="feature-card">
+      <div class="feature-box">
         <div class="icon">\u{1F3AF}</div>
-        <h3>Concern Targeting</h3>
-        <p>Whether it is acne, dark spots or ageing, we prioritise products that address your #1 concern.</p>
+        <h3>Concern-Targeted</h3>
+        <p>Addresses your #1 concern whether that is acne, dark spots, ageing, dehydration or dullness.</p>
       </div>
-      <div class="feature-card">
-        <div class="icon">\u26A1</div>
-        <h3>Flexible Routines</h3>
-        <p>Choose minimal (3 steps), moderate (5 steps) or a full AM/PM ritual (7 steps) to fit your lifestyle.</p>
+      <div class="feature-box">
+        <div class="icon">\u{1F4CA}</div>
+        <h3>35+ Product Database</h3>
+        <p>Real products from trusted brands, scored by compatibility. Updated with latest formulations.</p>
       </div>
-    </div>
+    </section>
 
-    <div class="cta-section">
-      <button class="btn btn-primary btn-lg" id="startQuiz">\u{1F9EA} Start My Skin Quiz</button>
-    </div>
+    <section class="home-how">
+      <h2>How It Works</h2>
+      <div class="how-steps">
+        <div class="how-step">
+          <div class="num">1</div>
+          <h4>Tell Us About Your Skin</h4>
+          <p>Your type, your top concern, and how much time you have.</p>
+        </div>
+        <div class="how-step">
+          <div class="num">2</div>
+          <h4>Get Matched Products</h4>
+          <p>Our algorithm scores 35+ products and picks the best fit.</p>
+        </div>
+        <div class="how-step">
+          <div class="num">3</div>
+          <h4>Follow Your Routine</h4>
+          <p>Products listed in order with timing, ingredients and tips.</p>
+        </div>
+      </div>
+    </section>
   `;
 
-  document.getElementById('startQuiz').addEventListener('click', () => {
-    state.quizStep = 0;
-    state.answers = {};
-    navigate('quiz');
-  });
+  document.getElementById('heroStart').addEventListener('click', startQuiz);
 }
 
 /* ================================================================
-   QUIZ SCREEN (FR-01, FR-02, FR-03, FR-08, FR-09)
+   QUIZ PAGE
    ================================================================ */
+function startQuiz() {
+  state.quizStep = 0;
+  state.answers = {};
+  navigate('quiz');
+}
+
 function renderQuiz(el) {
   const step = QUIZ_CONFIG.steps[state.quizStep];
   const total = QUIZ_CONFIG.steps.length;
@@ -186,246 +177,223 @@ function renderQuiz(el) {
   const selected = state.answers[step.id] || null;
 
   el.innerHTML = `
-    <a href="#" class="back-link" id="quizBack">\u2190 ${state.quizStep > 0 ? 'Previous question' : 'Back to Home'}</a>
-
-    <div class="progress-wrap">
-      <div class="progress-meta">
-        <span>Step ${state.quizStep + 1} of ${total}</span>
-        <span>${pct}% complete</span>
+    <div class="quiz-page">
+      <div class="quiz-breadcrumb">
+        <a href="#" id="quizBcHome">Home</a>
+        <span>/</span>
+        <span>Quiz - Step ${state.quizStep + 1} of ${total}</span>
       </div>
-      <div class="progress-bar">
-        <div class="progress-fill" style="width:${pct}%"></div>
-      </div>
-    </div>
 
-    <div class="quiz-header">
-      <h2>${step.question}</h2>
-      <p>${step.subtitle}</p>
-    </div>
-
-    <div class="option-grid" id="optionGrid">
-      ${step.options.map(opt => `
-        <div class="option ${selected === opt.id ? 'selected' : ''}" data-id="${opt.id}">
-          <div class="option-icon">${opt.icon}</div>
-          <div class="option-text">
-            <h3>${opt.label}</h3>
-            <p>${opt.desc}</p>
-          </div>
-          <div class="option-check"></div>
+      <div class="quiz-progress">
+        <div class="quiz-progress-bar">
+          <div class="quiz-progress-fill" style="width:${pct}%"></div>
         </div>
-      `).join('')}
-    </div>
-
-    ${selected ? `
-    <div class="quiz-actions">
-      <button class="btn btn-primary" id="quizNext">
-        ${state.quizStep < total - 1 ? 'Next \u2192' : 'See My Routine \u2728'}
-      </button>
-    </div>` : ''}
-  `;
-
-  // Back
-  document.getElementById('quizBack').addEventListener('click', (e) => {
-    e.preventDefault();
-    if (state.quizStep > 0) {
-      state.quizStep--;
-      if (state.history.length) state.history.pop();
-      render();
-    } else {
-      goBack();
-    }
-  });
-
-  // Option selection
-  el.querySelectorAll('.option').forEach(opt => {
-    opt.addEventListener('click', () => {
-      state.answers[step.id] = opt.dataset.id;
-      renderQuiz(el);
-    });
-  });
-
-  // Next
-  const nextBtn = document.getElementById('quizNext');
-  if (nextBtn) {
-    nextBtn.addEventListener('click', () => {
-      if (state.quizStep < total - 1) {
-        state.quizStep++;
-        navigate('quiz');
-      } else {
-        state.recommendedProducts = recommend(state.answers);
-        navigate('results');
-      }
-    });
-  }
-}
-
-/* ================================================================
-   RESULTS SCREEN (FR-04, FR-06, FR-10)
-   ================================================================ */
-function renderResults(el) {
-  const { skinType, concern, routine } = state.answers;
-  const products = state.recommendedProducts;
-  const isFullRoutine = routine === 'full';
-
-  el.innerHTML = `
-    <div class="results-banner">
-      <h2>\u2728 Your Personalised Routine</h2>
-      <p>${products.length} products selected for your skin profile</p>
-      <div class="profile-chips">
-        <span class="profile-chip">${SKIN_TYPE_LABELS[skinType]} Skin</span>
-        <span class="profile-chip">${CONCERN_LABELS[concern]}</span>
-        <span class="profile-chip">${ROUTINE_LABELS[routine]}</span>
+        <div class="quiz-progress-text">Step ${state.quizStep + 1} of ${total} &middot; ${pct}% complete</div>
       </div>
-    </div>
 
-    ${isFullRoutine ? `
-    <div class="schedule-section">
-      <h3>AM / PM Schedule</h3>
-      <table class="schedule-table">
-        <thead><tr><th>Step</th><th>Product</th><th>When</th></tr></thead>
-        <tbody>
-          ${products.map(p => `
-            <tr>
-              <td><strong>${p.stepLabel}</strong></td>
-              <td>${p.name}</td>
-              <td>${p.timing}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>
-    ` : ''}
+      <div class="quiz-question">
+        <h2>${step.question}</h2>
+        <p>${step.subtitle}</p>
+      </div>
 
-    <div class="products-section">
-      <h3>Recommended Products \u2014 Tap for details</h3>
-      <div class="product-grid">
-        ${products.map(p => `
-          <div class="product-card" data-product="${p.id}">
-            <div class="product-img ${p.color}">${p.emoji}</div>
-            <div class="product-info">
-              <span class="product-tag">${p.stepLabel}</span>
-              <h4>${p.name}</h4>
-              <div class="brand">${p.brand} \u00B7 ${p.price}</div>
-              <div class="timing">${p.timing}</div>
+      <div class="quiz-options">
+        ${step.options.map(opt => `
+          <div class="quiz-option ${selected === opt.id ? 'selected' : ''}" data-id="${opt.id}">
+            <div class="opt-icon">${opt.icon}</div>
+            <div class="opt-text">
+              <h4>${opt.label}</h4>
+              <p>${opt.desc}</p>
             </div>
+            <div class="opt-radio"></div>
           </div>
         `).join('')}
       </div>
-    </div>
 
-    <div class="results-actions">
-      <button class="btn btn-outline" id="retakeQuiz">\u21BB Retake Quiz</button>
-      <button class="btn btn-outline" id="goHomeBtn">\u2190 Back to Home</button>
-    </div>
-  `;
-
-  // Product detail
-  el.querySelectorAll('.product-card').forEach(card => {
-    card.addEventListener('click', () => {
-      state.selectedProduct = card.dataset.product;
-      navigate('product');
-    });
-  });
-
-  // Retake (FR-06)
-  document.getElementById('retakeQuiz').addEventListener('click', () => {
-    state.quizStep = 0;
-    state.answers = {};
-    state.history = [];
-    navigate('quiz');
-  });
-
-  document.getElementById('goHomeBtn').addEventListener('click', () => {
-    state.history = [];
-    navigate('home');
-  });
-}
-
-/* ================================================================
-   PRODUCT DETAIL SCREEN (FR-05, FR-07)
-   ================================================================ */
-function renderProduct(el) {
-  const p = state.recommendedProducts.find(x => x.id === state.selectedProduct)
-         || PRODUCTS.find(x => x.id === state.selectedProduct);
-  if (!p) { navigate('results', { isBack: true }); return; }
-
-  const starsHtml = '\u2605'.repeat(Math.floor(p.rating)) +
-                    (p.rating % 1 >= 0.5 ? '\u00BD' : '') +
-                    '\u2606'.repeat(5 - Math.ceil(p.rating));
-
-  el.innerHTML = `
-    <a href="#" class="back-link" id="prodBack">\u2190 Back to My Routine</a>
-
-    <div class="detail-grid">
-      <div class="detail-hero ${p.color}">${p.emoji}</div>
-
-      <div class="detail-content">
-        <h2>${p.name}</h2>
-        <p class="subtitle">${p.brand} \u00B7 ${p.size} \u00B7 ${p.price}</p>
-
-        <div class="badge-row">
-          ${p.tags.map(t => `<span class="badge badge-green">${t}</span>`).join('')}
-          <span class="badge badge-orange">${p.timing}</span>
-        </div>
-
-        <div class="rating-row">
-          <span class="stars">${starsHtml}</span>
-          <span class="rating-num">${p.rating}</span>
-          <span class="rating-count">(${p.reviews.toLocaleString()} reviews)</span>
-        </div>
-
-        <div class="detail-section">
-          <div class="label">Why This Product?</div>
-          <div class="body-text">${p.reason}</div>
-        </div>
-
-        <div class="detail-section">
-          <div class="label">Key Ingredients</div>
-          <div class="ingredient-tags">
-            ${p.ingredients.map(i => `<span class="ing-tag">${i}</span>`).join('')}
-          </div>
-        </div>
-
-        <div class="detail-section">
-          <div class="label">How to Use</div>
-          <div class="body-text">${p.howToUse}</div>
-        </div>
-
-        <button class="btn btn-primary" id="backToRoutine" style="margin-top:16px">\u2190 Back to My Routine</button>
+      <div class="quiz-footer">
+        <a href="#" class="quiz-back" id="quizBackBtn">${state.quizStep > 0 ? '\u2190 Previous' : '\u2190 Home'}</a>
+        <button class="quiz-next" id="quizNextBtn" ${!selected ? 'disabled' : ''}>
+          ${state.quizStep < total - 1 ? 'Next \u2192' : 'Get My Routine \u2728'}
+        </button>
       </div>
     </div>
   `;
 
-  document.getElementById('prodBack').addEventListener('click', (e) => { e.preventDefault(); goBack(); });
-  document.getElementById('backToRoutine').addEventListener('click', goBack);
+  // Breadcrumb home
+  document.getElementById('quizBcHome').addEventListener('click', e => { e.preventDefault(); navigate('home'); });
+
+  // Back button
+  document.getElementById('quizBackBtn').addEventListener('click', e => {
+    e.preventDefault();
+    if (state.quizStep > 0) { state.quizStep--; render(); }
+    else navigate('home');
+  });
+
+  // Option selection
+  el.querySelectorAll('.quiz-option').forEach(opt => {
+    opt.addEventListener('click', () => {
+      state.answers[step.id] = opt.dataset.id;
+      render();
+    });
+  });
+
+  // Next button
+  document.getElementById('quizNextBtn').addEventListener('click', () => {
+    if (!selected) return;
+    if (state.quizStep < total - 1) {
+      state.quizStep++;
+      render();
+    } else {
+      // Generate results
+      state.results = recommend(state.answers);
+      navigate('results');
+    }
+  });
 }
 
 /* ================================================================
-   BOOT
+   RESULTS PAGE
+   ================================================================ */
+function renderResults(el) {
+  const { skinType, concern, routine } = state.answers;
+  const products = state.results;
+  const showSchedule = routine === 'full';
+
+  el.innerHTML = `
+    <div class="results-page">
+      <div class="results-header">
+        <h1>\u2728 Your Personalised Routine</h1>
+        <p>${products.length} products selected from our database of 35+ based on your profile.</p>
+        <div class="results-tags">
+          <span class="results-tag">${SKIN_TYPE_LABELS[skinType]} Skin</span>
+          <span class="results-tag">${CONCERN_LABELS[concern]}</span>
+          <span class="results-tag">${ROUTINE_LABELS[routine]}</span>
+        </div>
+      </div>
+
+      ${showSchedule ? `
+      <div class="results-schedule">
+        <h2>Your AM / PM Schedule</h2>
+        <table class="schedule-grid">
+          <thead><tr><th>#</th><th>Step</th><th>Product</th><th>When</th></tr></thead>
+          <tbody>
+            ${products.map((p, i) => `
+              <tr>
+                <td>${i + 1}</td>
+                <td>${p.stepLabel}</td>
+                <td>${p.name}</td>
+                <td>${p.timing}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+      ` : ''}
+
+      <div class="results-products">
+        <h2>Recommended Products</h2>
+        <div class="products-list">
+          ${products.map(p => `
+            <div class="prod-card" data-id="${p.id}">
+              <div class="prod-icon ${p.color}">${p.emoji}</div>
+              <div class="prod-body">
+                <span class="prod-step">${p.stepLabel}</span>
+                <h3>${p.name}</h3>
+                <div class="meta">${p.brand} \u00B7 ${p.price}</div>
+                <div class="timing">${p.timing}</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="results-actions">
+        <a href="#" class="btn-outline" id="retakeBtn">\u21BB Retake Quiz</a>
+        <a href="#" class="btn-outline" id="homeBtn">\u2190 Back to Home</a>
+      </div>
+    </div>
+  `;
+
+  // Product click -> detail
+  el.querySelectorAll('.prod-card').forEach(card => {
+    card.addEventListener('click', () => {
+      state.selectedProduct = card.dataset.id;
+      navigate('detail');
+    });
+  });
+
+  document.getElementById('retakeBtn').addEventListener('click', e => { e.preventDefault(); startQuiz(); });
+  document.getElementById('homeBtn').addEventListener('click', e => { e.preventDefault(); navigate('home'); });
+}
+
+/* ================================================================
+   PRODUCT DETAIL PAGE
+   ================================================================ */
+function renderDetail(el) {
+  const p = state.results.find(x => x.id === state.selectedProduct)
+         || PRODUCTS.find(x => x.id === state.selectedProduct);
+  if (!p) { navigate('results'); return; }
+
+  const fullStars = Math.floor(p.rating);
+  const halfStar = p.rating % 1 >= 0.5;
+  const emptyStars = 5 - fullStars - (halfStar ? 1 : 0);
+  const starsHtml = '\u2605'.repeat(fullStars) + (halfStar ? '\u00BD' : '') + '\u2606'.repeat(emptyStars);
+
+  el.innerHTML = `
+    <div class="detail-page">
+      <a href="#" class="detail-back" id="detailBack">\u2190 Back to results</a>
+
+      <div class="detail-top">
+        <div class="detail-img ${p.color}">${p.emoji}</div>
+        <div class="detail-info">
+          <h1>${p.name}</h1>
+          <p class="sub">${p.brand} \u00B7 ${p.size} \u00B7 ${p.price}</p>
+          <div class="badges">
+            ${p.tags.map(t => `<span class="badge badge-green">${t}</span>`).join('')}
+            <span class="badge badge-orange">${p.timing}</span>
+          </div>
+          <div class="rating">
+            <span class="stars">${starsHtml}</span>
+            <span class="rating-val">${p.rating}</span>
+            <span class="rating-cnt">(${p.reviews.toLocaleString()} reviews)</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-sections">
+        <div class="detail-section">
+          <h3>Why This Product?</h3>
+          <p>${p.reason}</p>
+        </div>
+        <div class="detail-section">
+          <h3>Key Ingredients</h3>
+          <div class="ing-list">
+            ${p.ingredients.map(i => `<span class="ing-chip">${i}</span>`).join('')}
+          </div>
+        </div>
+        <div class="detail-section">
+          <h3>How to Use</h3>
+          <p>${p.howToUse}</p>
+        </div>
+      </div>
+
+      <div class="detail-cta">
+        <button id="detailBackBtn">\u2190 Back to My Routine</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('detailBack').addEventListener('click', e => { e.preventDefault(); navigate('results'); });
+  document.getElementById('detailBackBtn').addEventListener('click', () => navigate('results'));
+}
+
+/* ================================================================
+   INIT
    ================================================================ */
 document.addEventListener('DOMContentLoaded', () => {
   render();
 
-  // Nav link clicks
-  document.querySelectorAll('.nav-link').forEach(link => {
-    link.addEventListener('click', (e) => {
-      e.preventDefault();
-      const target = link.dataset.screen;
-      if (target === 'quiz') {
-        state.quizStep = 0;
-        state.answers = {};
-        state.history = [];
-      } else {
-        state.history = [];
-      }
-      navigate(target);
-    });
-  });
-
-  // Logo click -> home
-  document.getElementById('logoLink').addEventListener('click', (e) => {
-    e.preventDefault();
-    state.history = [];
-    navigate('home');
-  });
+  // Nav buttons
+  document.getElementById('logoLink').addEventListener('click', e => { e.preventDefault(); navigate('home'); });
+  document.getElementById('navHome').addEventListener('click', e => { e.preventDefault(); navigate('home'); });
+  document.getElementById('navQuiz').addEventListener('click', e => { e.preventDefault(); startQuiz(); });
 });
